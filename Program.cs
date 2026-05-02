@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using FoodDelivery.Data;
 using FoodDelivery.Middleware;
 using FoodDelivery.Services;
+using FoodDelivery.Hubs;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +42,7 @@ builder.Services.AddAuthentication(options =>
 
 // 3. Add Services
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddOpenApi(); // .NET 10 Built-in OpenAPI
 
 // 4. Dependency Injection
@@ -65,5 +67,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<OrderHub>("/orderHub");
 
 app.Run();

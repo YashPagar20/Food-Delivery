@@ -1,17 +1,21 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 using FoodDelivery.Data;
 using FoodDelivery.DTOs;
 using FoodDelivery.Models;
+using FoodDelivery.Hubs;
 
 namespace FoodDelivery.Services
 {
     public class OrderService : IOrderService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IHubContext<OrderHub> _hubContext;
 
-        public OrderService(ApplicationDbContext context)
+        public OrderService(ApplicationDbContext context, IHubContext<OrderHub> hubContext)
         {
             _context = context;
+            _hubContext = hubContext;
         }
 
         public async Task<OrderDto> PlaceOrderAsync(PlaceOrderRequest request, int customerId)
@@ -105,6 +109,11 @@ namespace FoodDelivery.Services
 
             order.Status = request.Status;
             await _context.SaveChangesAsync();
+
+            // Send Real-time notification
+            await _hubContext.Clients.Group($"Order_{orderId}")
+                .SendAsync("ReceiveStatusUpdate", new { OrderId = orderId, Status = order.Status.ToString() });
+
             return true;
         }
 
