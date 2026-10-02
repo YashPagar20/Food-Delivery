@@ -14,6 +14,11 @@ namespace FoodDelivery.Data
         public DbSet<MenuItem> MenuItems { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
+        public DbSet<Payment> Payments { get; set; }
+        public DbSet<Delivery> Deliveries { get; set; }
+        public DbSet<Notification> Notifications { get; set; }
+        public DbSet<Coupon> Coupons { get; set; }
+        public DbSet<Review> Reviews { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -28,11 +33,35 @@ namespace FoodDelivery.Data
                 .Property(o => o.TotalPrice)
                 .HasPrecision(18, 2);
 
+            modelBuilder.Entity<Order>()
+                .Property(o => o.DiscountAmount)
+                .HasPrecision(18, 2);
+
+            modelBuilder.Entity<Order>()
+                .Property(o => o.FinalPrice)
+                .HasPrecision(18, 2);
+
             modelBuilder.Entity<OrderItem>()
                 .Property(oi => oi.UnitPrice)
                 .HasPrecision(18, 2);
 
-            // Relationships
+            modelBuilder.Entity<Payment>()
+                .Property(p => p.Amount)
+                .HasPrecision(18, 2);
+
+            modelBuilder.Entity<Coupon>()
+                .Property(c => c.Value)
+                .HasPrecision(18, 2);
+
+            modelBuilder.Entity<Coupon>()
+                .Property(c => c.MinimumOrderAmount)
+                .HasPrecision(18, 2);
+
+            modelBuilder.Entity<Coupon>()
+                .Property(c => c.MaxDiscountAmount)
+                .HasPrecision(18, 2);
+
+            // Relationships & Delete Behaviors
             modelBuilder.Entity<Restaurant>()
                 .HasOne(r => r.Owner)
                 .WithMany()
@@ -44,6 +73,46 @@ namespace FoodDelivery.Data
                 .WithMany()
                 .HasForeignKey(o => o.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.Restaurant)
+                .WithMany()
+                .HasForeignKey(o => o.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<OrderItem>()
+                .HasOne(oi => oi.MenuItem)
+                .WithMany()
+                .HasForeignKey(oi => oi.MenuItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Delivery>()
+                .HasOne(d => d.Driver)
+                .WithMany()
+                .HasForeignKey(d => d.DriverId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Review>()
+                .HasOne(r => r.Customer)
+                .WithMany()
+                .HasForeignKey(r => r.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Review>()
+                .HasOne(r => r.Restaurant)
+                .WithMany()
+                .HasForeignKey(r => r.RestaurantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Review>()
+                .HasOne(r => r.Order)
+                .WithOne(o => o.Review)
+                .HasForeignKey<Review>(r => r.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Coupon>()
+                .HasIndex(c => c.Code)
+                .IsUnique();
         }
     }
 }

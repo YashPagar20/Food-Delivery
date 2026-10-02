@@ -1,29 +1,30 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using FoodDelivery.Data;
 using FoodDelivery.DTOs;
 using FoodDelivery.Models;
+using FoodDelivery.Interfaces.Services;
+using FoodDelivery.Interfaces.Repositories;
 using BCrypt.Net;
 
 namespace FoodDelivery.Services
 {
     public class AuthService : IAuthService
     {
-        private readonly ApplicationDbContext _context;
+        private readonly IUserRepository _userRepository;
         private readonly IConfiguration _configuration;
 
-        public AuthService(ApplicationDbContext context, IConfiguration configuration)
+        public AuthService(IUserRepository userRepository, IConfiguration configuration)
         {
-            _context = context;
+            _userRepository = userRepository;
             _configuration = configuration;
         }
 
-        public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
+        public async Task<AuthResponse> registerAsync(RegisterRequest request)
         {
-            if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+            var existingUser = await _userRepository.getByEmailAsync(request.Email);
+            if (existingUser != null)
             {
                 return new AuthResponse { Success = false, Message = "Email already registered." };
             }
@@ -36,15 +37,15 @@ namespace FoodDelivery.Services
                 Role = request.Role
             };
 
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+            await _userRepository.addAsync(user);
+            await _userRepository.completeAsync();
 
             return new AuthResponse { Success = true, Message = "User registered successfully." };
         }
 
-        public async Task<AuthResponse> LoginAsync(LoginRequest request)
+        public async Task<AuthResponse> loginAsync(LoginRequest request)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+            var user = await _userRepository.getByEmailAsync(request.Email);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             {

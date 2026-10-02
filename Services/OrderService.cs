@@ -1,44 +1,67 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
-using FoodDelivery.Data;
 using FoodDelivery.DTOs;
+using FoodDelivery.Enums;
 using FoodDelivery.Models;
 using FoodDelivery.Hubs;
+using FoodDelivery.Interfaces.Services;
+using FoodDelivery.Interfaces.Repositories;
 
 namespace FoodDelivery.Services
 {
     public class OrderService : IOrderService
     {
-        private readonly ApplicationDbContext _context;
+        private readonly IOrderRepository _orderRepository;
+        private readonly IRestaurantRepository _restaurantRepository;
+        private readonly IRepository<MenuItem> _menuItemRepository;
+        private readonly ICouponRepository _couponRepository;
+        private readonly IUserRepository _userRepository;
         private readonly IHubContext<OrderHub> _hubContext;
+        private readonly ICouponService _couponService;
+        private readonly INotificationService _notificationService;
 
-        public OrderService(ApplicationDbContext context, IHubContext<OrderHub> hubContext)
+        public OrderService(
+            IOrderRepository orderRepository,
+            IRestaurantRepository restaurantRepository,
+            IRepository<MenuItem> menuItemRepository,
+            ICouponRepository couponRepository,
+            IUserRepository userRepository,
+            IHubContext<OrderHub> hubContext,
+            ICouponService couponService,
+            INotificationService notificationService)
         {
-            _context = context;
+            _orderRepository = orderRepository;
+            _restaurantRepository = restaurantRepository;
+            _menuItemRepository = menuItemRepository;
+            _couponRepository = couponRepository;
+            _userRepository = userRepository;
             _hubContext = hubContext;
+            _couponService = couponService;
+            _notificationService = notificationService;
         }
 
-        public async Task<OrderDto> PlaceOrderAsync(PlaceOrderRequest request, int customerId)
+        public async Task<OrderDto> placeOrderAsync(PlaceOrderRequest request, int customerId)
         {
-            var restaurant = await _context.Restaurants.FindAsync(request.RestaurantId);
-            if (restaurant == null) throw new Exception("Restaurant not found.");
+            var restaurant = await _restaurantRepository.getByIdAsync(request.RestaurantId);
+            if (restaurant == null) throw new KeyNotFoundException("Restaurant not found.");
 
             var order = new Order
             {
                 CustomerId = customerId,
                 RestaurantId = request.RestaurantId,
-                TotalPrice = 0, // Will calculate below
+                TotalPrice = 0,
+                DiscountAmount = 0,
+                FinalPrice = 0,
                 OrderDate = DateTime.UtcNow,
-                Status = Enums.OrderStatus.Pending
+                Status = OrderStatus.Pending
             };
 
             decimal total = 0;
 
             foreach (var itemReq in request.Items)
             {
-                var menuItem = await _context.MenuItems.FindAsync(itemReq.MenuItemId);
+                var menuItem = await _menuItemRepository.getByIdAsync(itemReq.MenuItemId);
                 if (menuItem == null || menuItem.RestaurantId != request.RestaurantId)
-                    throw new Exception($"Menu item {itemReq.MenuItemId} not found or doesn't belong to this restaurant.");
+                    throw new InvalidOperationException($"Menu item {itemReq.MenuItemId} not found or doesn't belong to this restaurant.");
 
                 var orderItem = new OrderItem
                 {
@@ -52,72 +75,96 @@ namespace FoodDelivery.Services
             }
 
             order.TotalPrice = total;
-            _context.Orders.Add(order);
-            await _context.SaveChangesAsync();
+            order.FinalPrice = total;
+
+            if (!string.IsNullOrWhiteSpace(request.CouponCode))
+            {
+                var couponResponse = await _couponService.applyCouponAsync(new ApplyCouponRequest
+                {
+                    Code = request.CouponCode,
+                    OrderTotal = total
+                });
+
+                if (couponResponse.IsValid)
+                {
+                    var coupon = await _couponRepository.getByCodeAsync(couponResponse.Code);
+                    if (coupon != null)
+                    {
+                        order.CouponId = coupon.Id;
+                        order.Coupon = coupon;
+                        order.DiscountAmount = couponResponse.DiscountAmount;
+                        order.FinalPrice = couponResponse.FinalTotal;
+                        await _couponService.incrementUsageAsync(couponResponse.Code);
+                    }
+                }
+            }
+
+            await _orderRepository.addAsync(order);
+            await _orderRepository.completeAsync();
+
+            await _notificationService.sendNotificationAsync(new SendNotificationRequest
+            {
+                UserId = customerId,
+                Title = "Order Placed Successfully",
+                Message = $"Your order #{order.Id} with {restaurant.Name} for ${order.FinalPrice:F2} has been placed.",
+                Type = NotificationType.InApp
+            });
 
             return MapToDto(order);
         }
 
-        public async Task<OrderDto?> GetOrderByIdAsync(int id)
+        public async Task<OrderDto?> getOrderByIdAsync(int id)
         {
-            var order = await _context.Orders
-                .Include(o => o.OrderItems)
-                .ThenInclude(oi => oi.MenuItem)
-                .FirstOrDefaultAsync(o => o.Id == id);
-
+            var order = await _orderRepository.getOrderWithDetailsAsync(id);
             return order == null ? null : MapToDto(order);
         }
 
-        public async Task<IEnumerable<OrderDto>> GetUserOrdersAsync(int userId)
+        public async Task<IEnumerable<OrderDto>> getUserOrdersAsync(int userId)
         {
-            var orders = await _context.Orders
-                .Include(o => o.OrderItems)
-                .ThenInclude(oi => oi.MenuItem)
-                .Where(o => o.CustomerId == userId)
-                .ToListAsync();
-
+            var orders = await _orderRepository.getUserOrdersWithDetailsAsync(userId);
             return orders.Select(MapToDto);
         }
 
-        public async Task<IEnumerable<OrderDto>> GetRestaurantOrdersAsync(int restaurantId, int ownerId)
+        public async Task<IEnumerable<OrderDto>> getRestaurantOrdersAsync(int restaurantId, int ownerId)
         {
-            var restaurant = await _context.Restaurants.FindAsync(restaurantId);
+            var restaurant = await _restaurantRepository.getByIdAsync(restaurantId);
             if (restaurant == null || restaurant.OwnerId != ownerId)
                 throw new UnauthorizedAccessException("Not authorized to view orders for this restaurant.");
 
-            var orders = await _context.Orders
-                .Include(o => o.OrderItems)
-                .ThenInclude(oi => oi.MenuItem)
-                .Where(o => o.RestaurantId == restaurantId)
-                .ToListAsync();
-
+            var orders = await _orderRepository.getRestaurantOrdersWithDetailsAsync(restaurantId);
             return orders.Select(MapToDto);
         }
 
-        public async Task<bool> UpdateOrderStatusAsync(int orderId, UpdateStatusRequest request, int userId)
+        public async Task<bool> updateOrderStatusAsync(int orderId, UpdateStatusRequest request, int userId)
         {
-            var order = await _context.Orders.Include(o => o.Restaurant).FirstOrDefaultAsync(o => o.Id == orderId);
+            var order = await _orderRepository.getOrderWithDetailsAsync(orderId);
             if (order == null) return false;
 
-            // Only restaurant owner or admin can update status
             if (order.Restaurant?.OwnerId != userId)
             {
-                // check if admin (simplification: assume only owner for now or check user role from DB)
-                var user = await _context.Users.FindAsync(userId);
-                if (user?.Role != Enums.UserRole.Admin) return false;
+                var user = await _userRepository.getByIdAsync(userId);
+                if (user?.Role != UserRole.Admin) return false;
             }
 
             order.Status = request.Status;
-            await _context.SaveChangesAsync();
+            _orderRepository.update(order);
+            await _orderRepository.completeAsync();
 
-            // Send Real-time notification
             await _hubContext.Clients.Group($"Order_{orderId}")
                 .SendAsync("ReceiveStatusUpdate", new { OrderId = orderId, Status = order.Status.ToString() });
+
+            await _notificationService.sendNotificationAsync(new SendNotificationRequest
+            {
+                UserId = order.CustomerId,
+                Title = "Order Status Updated",
+                Message = $"Your order #{orderId} status is now {request.Status}.",
+                Type = NotificationType.InApp
+            });
 
             return true;
         }
 
-        private OrderDto MapToDto(Order order)
+        private static OrderDto MapToDto(Order order)
         {
             return new OrderDto
             {
@@ -125,6 +172,9 @@ namespace FoodDelivery.Services
                 CustomerId = order.CustomerId,
                 RestaurantId = order.RestaurantId,
                 TotalPrice = order.TotalPrice,
+                DiscountAmount = order.DiscountAmount,
+                FinalPrice = order.FinalPrice > 0 ? order.FinalPrice : order.TotalPrice,
+                CouponCode = order.Coupon?.Code,
                 Status = order.Status,
                 OrderDate = order.OrderDate,
                 Items = order.OrderItems.Select(oi => new OrderItemDto

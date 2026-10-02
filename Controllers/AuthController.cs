@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using FoodDelivery.DTOs;
-using FoodDelivery.Services;
+using FoodDelivery.Interfaces.Services;
 
 namespace FoodDelivery.Controllers
 {
@@ -18,7 +18,7 @@ namespace FoodDelivery.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterRequest request)
         {
-            var result = await _authService.RegisterAsync(request);
+            var result = await _authService.registerAsync(request);
             if (!result.Success)
             {
                 return BadRequest(result);
@@ -29,7 +29,7 @@ namespace FoodDelivery.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login(LoginRequest request)
         {
-            var result = await _authService.LoginAsync(request);
+            var result = await _authService.loginAsync(request);
             if (!result.Success)
             {
                 return Unauthorized(result);

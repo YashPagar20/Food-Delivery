@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using FoodDelivery.DTOs;
-using FoodDelivery.Services;
+using FoodDelivery.Interfaces.Services;
 
 namespace FoodDelivery.Controllers
 {
@@ -22,14 +22,14 @@ namespace FoodDelivery.Controllers
         [HttpGet]
         public async Task<IActionResult> GetRestaurants([FromQuery] string? location)
         {
-            var result = await _restaurantService.GetAllRestaurantsAsync(location);
+            var result = await _restaurantService.getAllRestaurantsAsync(location);
             return Ok(result);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetRestaurant(int id)
         {
-            var result = await _restaurantService.GetRestaurantByIdAsync(id);
+            var result = await _restaurantService.getRestaurantByIdAsync(id);
             if (result == null) return NotFound();
             return Ok(result);
         }
@@ -38,7 +38,7 @@ namespace FoodDelivery.Controllers
         [Authorize(Roles = "RestaurantOwner,Admin")]
         public async Task<IActionResult> CreateRestaurant(CreateRestaurantRequest request)
         {
-            var result = await _restaurantService.CreateRestaurantAsync(request, GetUserId());
+            var result = await _restaurantService.createRestaurantAsync(request, GetUserId());
             return CreatedAtAction(nameof(GetRestaurant), new { id = result.Id }, result);
         }
 
@@ -46,7 +46,7 @@ namespace FoodDelivery.Controllers
         [Authorize(Roles = "RestaurantOwner,Admin")]
         public async Task<IActionResult> UpdateRestaurant(int id, CreateRestaurantRequest request)
         {
-            var result = await _restaurantService.UpdateRestaurantAsync(id, request, GetUserId());
+            var result = await _restaurantService.updateRestaurantAsync(id, request, GetUserId());
             if (!result) return Forbid();
             return NoContent();
         }
@@ -55,7 +55,7 @@ namespace FoodDelivery.Controllers
         [Authorize(Roles = "RestaurantOwner,Admin")]
         public async Task<IActionResult> DeleteRestaurant(int id)
         {
-            var result = await _restaurantService.DeleteRestaurantAsync(id, GetUserId());
+            var result = await _restaurantService.deleteRestaurantAsync(id, GetUserId());
             if (!result) return Forbid();
             return NoContent();
         }
@@ -64,7 +64,7 @@ namespace FoodDelivery.Controllers
         [HttpGet("{restaurantId}/menu")]
         public async Task<IActionResult> GetMenu(int restaurantId, [FromQuery] string? category)
         {
-            var result = await _restaurantService.GetMenuItemsAsync(restaurantId, category);
+            var result = await _restaurantService.getMenuItemsAsync(restaurantId, category);
             return Ok(result);
         }
 
@@ -72,7 +72,7 @@ namespace FoodDelivery.Controllers
         [Authorize(Roles = "RestaurantOwner,Admin")]
         public async Task<IActionResult> AddMenuItem(int restaurantId, CreateMenuItemRequest request)
         {
-            var result = await _restaurantService.AddMenuItemAsync(restaurantId, request, GetUserId());
+            var result = await _restaurantService.addMenuItemAsync(restaurantId, request, GetUserId());
             return Ok(result);
         }
 
@@ -80,7 +80,7 @@ namespace FoodDelivery.Controllers
         [Authorize(Roles = "RestaurantOwner,Admin")]
         public async Task<IActionResult> UpdateMenuItem(int menuItemId, CreateMenuItemRequest request)
         {
-            var result = await _restaurantService.UpdateMenuItemAsync(menuItemId, request, GetUserId());
+            var result = await _restaurantService.updateMenuItemAsync(menuItemId, request, GetUserId());
             if (!result) return Forbid();
             return NoContent();
         }
@@ -89,7 +89,7 @@ namespace FoodDelivery.Controllers
         [Authorize(Roles = "RestaurantOwner,Admin")]
         public async Task<IActionResult> DeleteMenuItem(int menuItemId)
         {
-            var result = await _restaurantService.DeleteMenuItemAsync(menuItemId, GetUserId());
+            var result = await _restaurantService.deleteMenuItemAsync(menuItemId, GetUserId());
             if (!result) return Forbid();
             return NoContent();
         }

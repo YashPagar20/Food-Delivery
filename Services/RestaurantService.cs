@@ -1,28 +1,28 @@
-using Microsoft.EntityFrameworkCore;
-using FoodDelivery.Data;
 using FoodDelivery.DTOs;
 using FoodDelivery.Models;
+using FoodDelivery.Interfaces.Services;
+using FoodDelivery.Interfaces.Repositories;
 
 namespace FoodDelivery.Services
 {
     public class RestaurantService : IRestaurantService
     {
-        private readonly ApplicationDbContext _context;
+        private readonly IRestaurantRepository _restaurantRepository;
+        private readonly IRepository<MenuItem> _menuItemRepository;
 
-        public RestaurantService(ApplicationDbContext context)
+        public RestaurantService(IRestaurantRepository restaurantRepository, IRepository<MenuItem> menuItemRepository)
         {
-            _context = context;
+            _restaurantRepository = restaurantRepository;
+            _menuItemRepository = menuItemRepository;
         }
 
-        public async Task<IEnumerable<RestaurantDto>> GetAllRestaurantsAsync(string? location)
+        public async Task<IEnumerable<RestaurantDto>> getAllRestaurantsAsync(string? location)
         {
-            var query = _context.Restaurants.AsQueryable();
-            if (!string.IsNullOrEmpty(location))
-            {
-                query = query.Where(r => r.Location.Contains(location));
-            }
+            var restaurants = string.IsNullOrEmpty(location)
+                ? await _restaurantRepository.getAllAsync()
+                : await _restaurantRepository.findAsync(r => r.Location.Contains(location));
 
-            return await query.Select(r => new RestaurantDto
+            return restaurants.Select(r => new RestaurantDto
             {
                 Id = r.Id,
                 Name = r.Name,
@@ -30,12 +30,12 @@ namespace FoodDelivery.Services
                 Address = r.Address,
                 Location = r.Location,
                 OwnerId = r.OwnerId
-            }).ToListAsync();
+            });
         }
 
-        public async Task<RestaurantDto?> GetRestaurantByIdAsync(int id)
+        public async Task<RestaurantDto?> getRestaurantByIdAsync(int id)
         {
-            var r = await _context.Restaurants.FindAsync(id);
+            var r = await _restaurantRepository.getByIdAsync(id);
             if (r == null) return null;
 
             return new RestaurantDto
@@ -49,7 +49,7 @@ namespace FoodDelivery.Services
             };
         }
 
-        public async Task<RestaurantDto> CreateRestaurantAsync(CreateRestaurantRequest request, int ownerId)
+        public async Task<RestaurantDto> createRestaurantAsync(CreateRestaurantRequest request, int ownerId)
         {
             var restaurant = new Restaurant
             {
@@ -60,8 +60,8 @@ namespace FoodDelivery.Services
                 OwnerId = ownerId
             };
 
-            _context.Restaurants.Add(restaurant);
-            await _context.SaveChangesAsync();
+            await _restaurantRepository.addAsync(restaurant);
+            await _restaurantRepository.completeAsync();
 
             return new RestaurantDto
             {
@@ -74,9 +74,9 @@ namespace FoodDelivery.Services
             };
         }
 
-        public async Task<bool> UpdateRestaurantAsync(int id, CreateRestaurantRequest request, int ownerId)
+        public async Task<bool> updateRestaurantAsync(int id, CreateRestaurantRequest request, int ownerId)
         {
-            var r = await _context.Restaurants.FindAsync(id);
+            var r = await _restaurantRepository.getByIdAsync(id);
             if (r == null || r.OwnerId != ownerId) return false;
 
             r.Name = request.Name;
@@ -84,30 +84,27 @@ namespace FoodDelivery.Services
             r.Address = request.Address;
             r.Location = request.Location;
 
-            await _context.SaveChangesAsync();
+            _restaurantRepository.update(r);
+            await _restaurantRepository.completeAsync();
             return true;
         }
 
-        public async Task<bool> DeleteRestaurantAsync(int id, int ownerId)
+        public async Task<bool> deleteRestaurantAsync(int id, int ownerId)
         {
-            var r = await _context.Restaurants.FindAsync(id);
+            var r = await _restaurantRepository.getByIdAsync(id);
             if (r == null || r.OwnerId != ownerId) return false;
 
-            _context.Restaurants.Remove(r);
-            await _context.SaveChangesAsync();
+            _restaurantRepository.remove(r);
+            await _restaurantRepository.completeAsync();
             return true;
         }
 
-        // Menu Item Logic
-        public async Task<IEnumerable<MenuItemDto>> GetMenuItemsAsync(int restaurantId, string? category)
+        public async Task<IEnumerable<MenuItemDto>> getMenuItemsAsync(int restaurantId, string? category)
         {
-            var query = _context.MenuItems.Where(m => m.RestaurantId == restaurantId);
-            if (!string.IsNullOrEmpty(category))
-            {
-                query = query.Where(m => m.Category.Contains(category));
-            }
+            var menuItems = await _menuItemRepository.findAsync(m => m.RestaurantId == restaurantId &&
+                (string.IsNullOrEmpty(category) || m.Category.Contains(category)));
 
-            return await query.Select(m => new MenuItemDto
+            return menuItems.Select(m => new MenuItemDto
             {
                 Id = m.Id,
                 Name = m.Name,
@@ -115,12 +112,12 @@ namespace FoodDelivery.Services
                 Price = m.Price,
                 Category = m.Category,
                 RestaurantId = m.RestaurantId
-            }).ToListAsync();
+            });
         }
 
-        public async Task<MenuItemDto> AddMenuItemAsync(int restaurantId, CreateMenuItemRequest request, int ownerId)
+        public async Task<MenuItemDto> addMenuItemAsync(int restaurantId, CreateMenuItemRequest request, int ownerId)
         {
-            var restaurant = await _context.Restaurants.FindAsync(restaurantId);
+            var restaurant = await _restaurantRepository.getByIdAsync(restaurantId);
             if (restaurant == null || restaurant.OwnerId != ownerId)
                 throw new UnauthorizedAccessException("Not authorized to add menu items to this restaurant.");
 
@@ -133,8 +130,8 @@ namespace FoodDelivery.Services
                 RestaurantId = restaurantId
             };
 
-            _context.MenuItems.Add(item);
-            await _context.SaveChangesAsync();
+            await _menuItemRepository.addAsync(item);
+            await _menuItemRepository.completeAsync();
 
             return new MenuItemDto
             {
@@ -147,27 +144,34 @@ namespace FoodDelivery.Services
             };
         }
 
-        public async Task<bool> UpdateMenuItemAsync(int menuItemId, CreateMenuItemRequest request, int ownerId)
+        public async Task<bool> updateMenuItemAsync(int menuItemId, CreateMenuItemRequest request, int ownerId)
         {
-            var item = await _context.MenuItems.Include(m => m.Restaurant).FirstOrDefaultAsync(m => m.Id == menuItemId);
-            if (item == null || item.Restaurant?.OwnerId != ownerId) return false;
+            var item = await _menuItemRepository.getByIdAsync(menuItemId);
+            if (item == null) return false;
+
+            var restaurant = await _restaurantRepository.getByIdAsync(item.RestaurantId);
+            if (restaurant == null || restaurant.OwnerId != ownerId) return false;
 
             item.Name = request.Name;
             item.Description = request.Description;
             item.Price = request.Price;
             item.Category = request.Category;
 
-            await _context.SaveChangesAsync();
+            _menuItemRepository.update(item);
+            await _menuItemRepository.completeAsync();
             return true;
         }
 
-        public async Task<bool> DeleteMenuItemAsync(int menuItemId, int ownerId)
+        public async Task<bool> deleteMenuItemAsync(int menuItemId, int ownerId)
         {
-            var item = await _context.MenuItems.Include(m => m.Restaurant).FirstOrDefaultAsync(m => m.Id == menuItemId);
-            if (item == null || item.Restaurant?.OwnerId != ownerId) return false;
+            var item = await _menuItemRepository.getByIdAsync(menuItemId);
+            if (item == null) return false;
 
-            _context.MenuItems.Remove(item);
-            await _context.SaveChangesAsync();
+            var restaurant = await _restaurantRepository.getByIdAsync(item.RestaurantId);
+            if (restaurant == null || restaurant.OwnerId != ownerId) return false;
+
+            _menuItemRepository.remove(item);
+            await _menuItemRepository.completeAsync();
             return true;
         }
     }

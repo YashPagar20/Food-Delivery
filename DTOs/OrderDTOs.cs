@@ -9,6 +9,9 @@ namespace FoodDelivery.DTOs
         public int CustomerId { get; set; }
         public int RestaurantId { get; set; }
         public decimal TotalPrice { get; set; }
+        public decimal DiscountAmount { get; set; }
+        public decimal FinalPrice { get; set; }
+        public string? CouponCode { get; set; }
         public OrderStatus Status { get; set; }
         public DateTime OrderDate { get; set; }
         public List<OrderItemDto> Items { get; set; } = new();
@@ -28,6 +31,7 @@ namespace FoodDelivery.DTOs
         public int RestaurantId { get; set; }
         [Required, MinLength(1)]
         public List<OrderItemRequest> Items { get; set; } = new();
+        public string? CouponCode { get; set; }
     }
 
     public class OrderItemRequest
